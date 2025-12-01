@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { HttpClientModule } from './common/http/http-client.module';
 import { UserModule } from './user/user.module';
 import { AppController } from './app.controller';
 
@@ -15,6 +16,7 @@ import { AppController } from './app.controller';
     }),
     PrismaModule,
     RedisModule,
+    HttpClientModule,
     UserModule,
   ],
   controllers: [AppController],
