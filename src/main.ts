@@ -3,7 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+
+// Fix BigInt serialization
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,8 +27,12 @@ async function bootstrap() {
     }),
   );
 
-  // Global filters
-  app.useGlobalFilters(new HttpExceptionFilter());
+  // Global filters (注意顺序：从具体到通用)
+  app.useGlobalFilters(
+    new AllExceptionsFilter(), // 最后兜底
+    new PrismaExceptionFilter(), // Prisma 异常
+    new HttpExceptionFilter(), // HTTP 异常
+  );
 
   // Global interceptors
   app.useGlobalInterceptors(new TransformInterceptor());
