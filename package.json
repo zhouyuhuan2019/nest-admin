@@ -4,12 +4,14 @@
   "description": "Advich NestJS Admin Panel",
   "private": true,
   "scripts": {
-    "start": "nest start",
+    "start": "node dist/main",
     "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:deploy": "prisma migrate deploy",
     "test": "jest"
   },
   "dependencies": {
