@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import { request, Dispatcher, Agent } from 'undici';
 import { Readable } from 'stream';
 import { LoggerService } from '../logger/logger.service';
 
@@ -11,7 +11,11 @@ export interface HttpClientConfig {
   retryDelay?: number;
 }
 
-export interface RequestOptions extends AxiosRequestConfig {
+export interface RequestOptions {
+  baseURL?: string;
+  timeout?: number;
+  headers?: Record<string, string>;
+  params?: Record<string, any>;
   retries?: number;
   retryDelay?: number;
 }
@@ -25,7 +29,7 @@ export interface StreamOptions {
 @Injectable()
 export class HttpClientService {
   private readonly logger: LoggerService;
-  private clients: Map<string, AxiosInstance> = new Map();
+  private agents: Map<string, Agent> = new Map();
 
   constructor(logger: LoggerService) {
     this.logger = logger;
@@ -33,121 +37,149 @@ export class HttpClientService {
   }
 
   /**
-   * 创建或获取 HTTP 客户端实例
+   * 创建或获取 HTTP Agent
    */
-  getClient(serviceName: string, config?: HttpClientConfig): AxiosInstance {
-    if (this.clients.has(serviceName)) {
-      return this.clients.get(serviceName)!;
+  private getAgent(serviceName: string): Agent {
+    if (this.agents.has(serviceName)) {
+      return this.agents.get(serviceName)!;
     }
 
-    const client = axios.create({
-      baseURL: config?.baseURL,
-      timeout: config?.timeout || 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        ...config?.headers,
-      },
+    const agent = new Agent({
+      keepAliveTimeout: 10000,
+      keepAliveMaxTimeout: 60000,
+      connections: 100,
     });
 
-    // 请求拦截器
-    client.interceptors.request.use(
-      (config) => {
-        this.logger.debug(`[${serviceName}] ${config.method?.toUpperCase()} ${config.url}`);
-        return config;
-      },
-      (error) => {
-        this.logger.error(`[${serviceName}] 请求错误:`, error.message);
-        return Promise.reject(error);
-      },
-    );
+    this.agents.set(serviceName, agent);
+    return agent;
+  }
 
-    // 响应拦截器
-    client.interceptors.response.use(
-      (response) => {
-        this.logger.debug(`[${serviceName}] 响应: ${response.status}`);
-        return response;
-      },
-      async (error) => {
-        const config = error.config as RequestOptions;
-        const retries = config.retries || 0;
-        const retryDelay = config.retryDelay || 1000;
+  /**
+   * 构建完整 URL
+   */
+  private buildUrl(baseURL: string | undefined, path: string, params?: Record<string, any>): string {
+    let url = baseURL ? `${baseURL}${path}` : path;
 
-        // 重试逻辑
-        if (retries > 0 && this.shouldRetry(error)) {
-          config.retries = retries - 1;
-          this.logger.warn(`[${serviceName}] 重试请求，剩余次数: ${config.retries}`);
-          await this.delay(retryDelay);
-          return client(config);
+    if (params && Object.keys(params).length > 0) {
+      const searchParams = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          searchParams.append(key, String(value));
+        }
+      });
+      url += `?${searchParams.toString()}`;
+    }
+
+    return url;
+  }
+
+  /**
+   * 执行 HTTP 请求
+   */
+  private async makeRequest<T>(
+    serviceName: string,
+    method: string,
+    url: string,
+    options?: RequestOptions,
+    body?: any,
+  ): Promise<T> {
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
+
+    this.logger.api(serviceName, method, fullUrl);
+
+    const startTime = Date.now();
+    let retries = options?.retries || 0;
+
+    while (true) {
+      try {
+        const response = await request(fullUrl, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          bodyTimeout: options?.timeout || 30000,
+          headersTimeout: options?.timeout || 30000,
+          dispatcher: agent,
+        });
+
+        const duration = Date.now() - startTime;
+        this.logger.api(serviceName, method, fullUrl, response.statusCode, duration);
+
+        if (response.statusCode >= 400) {
+          const errorText = await response.body.text();
+          throw new Error(`HTTP ${response.statusCode}: ${errorText}`);
         }
 
-        this.logger.error(`[${serviceName}] 响应错误:`, error.message);
-        return Promise.reject(error);
-      },
-    );
+        const text = await response.body.text();
+        return text ? JSON.parse(text) : ({} as T);
+      } catch (error: any) {
+        if (retries > 0 && this.shouldRetry(error)) {
+          retries--;
+          this.logger.warn(`[${serviceName}] 重试请求，剩余次数: ${retries}`);
+          await this.delay(options?.retryDelay || 1000);
+          continue;
+        }
 
-    this.clients.set(serviceName, client);
-    return client;
+        this.logger.error(`[${serviceName}] 请求失败: ${error.message}`);
+        throw error;
+      }
+    }
   }
 
   /**
    * GET 请求
    */
   async get<T = any>(serviceName: string, url: string, options?: RequestOptions): Promise<T> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.get<T>(url, options);
-    return response.data;
+    return this.makeRequest<T>(serviceName, 'GET', url, options);
   }
 
   /**
    * POST 请求
    */
   async post<T = any>(serviceName: string, url: string, data?: any, options?: RequestOptions): Promise<T> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.post<T>(url, data, options);
-    return response.data;
+    return this.makeRequest<T>(serviceName, 'POST', url, options, data);
   }
 
   /**
    * PUT 请求
    */
   async put<T = any>(serviceName: string, url: string, data?: any, options?: RequestOptions): Promise<T> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.put<T>(url, data, options);
-    return response.data;
+    return this.makeRequest<T>(serviceName, 'PUT', url, options, data);
   }
 
   /**
    * DELETE 请求
    */
   async delete<T = any>(serviceName: string, url: string, options?: RequestOptions): Promise<T> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.delete<T>(url, options);
-    return response.data;
+    return this.makeRequest<T>(serviceName, 'DELETE', url, options);
   }
 
   /**
    * PATCH 请求
    */
   async patch<T = any>(serviceName: string, url: string, data?: any, options?: RequestOptions): Promise<T> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.patch<T>(url, data, options);
-    return response.data;
+    return this.makeRequest<T>(serviceName, 'PATCH', url, options, data);
   }
 
   /**
    * 流式 GET 请求（SSE）
    */
   async getStream(serviceName: string, url: string, options?: RequestOptions & StreamOptions): Promise<Readable> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
 
-    this.logger.debug(`[${serviceName}] 开始流式 GET 请求: ${url}`);
+    this.logger.debug(`[${serviceName}] 开始流式 GET 请求: ${fullUrl}`);
 
-    const response = await client.get(url, {
-      ...options,
-      responseType: 'stream',
+    const response = await request(fullUrl, {
+      method: 'GET',
+      headers: options?.headers,
+      dispatcher: agent,
     });
 
-    const stream = response.data as Readable;
+    const stream = Readable.from(response.body);
 
     // 添加数据监听日志
     stream.on('data', (chunk) => {
@@ -183,16 +215,22 @@ export class HttpClientService {
     data?: any,
     options?: RequestOptions & StreamOptions,
   ): Promise<Readable> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
 
-    this.logger.debug(`[${serviceName}] 开始流式 POST 请求: ${url}`);
+    this.logger.debug(`[${serviceName}] 开始流式 POST 请求: ${fullUrl}`);
 
-    const response = await client.post(url, data, {
-      ...options,
-      responseType: 'stream',
+    const response = await request(fullUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+      body: data ? JSON.stringify(data) : undefined,
+      dispatcher: agent,
     });
 
-    const stream = response.data as Readable;
+    const stream = Readable.from(response.body);
 
     // 添加数据监听日志
     stream.on('data', (chunk) => {
@@ -223,12 +261,21 @@ export class HttpClientService {
    * 下载文件
    */
   async downloadFile(serviceName: string, url: string, options?: RequestOptions): Promise<Buffer> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    const response = await client.get(url, {
-      ...options,
-      responseType: 'arraybuffer',
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
+
+    const response = await request(fullUrl, {
+      method: 'GET',
+      headers: options?.headers,
+      dispatcher: agent,
     });
-    return Buffer.from(response.data);
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.body) {
+      chunks.push(chunk as Buffer);
+    }
+
+    return Buffer.concat(chunks);
   }
 
   /**
@@ -241,20 +288,24 @@ export class HttpClientService {
     filename: string,
     options?: RequestOptions,
   ): Promise<any> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
     const FormData = require('form-data');
     const formData = new FormData();
     formData.append('file', file, filename);
 
-    const response = await client.post(url, formData, {
-      ...options,
+    const response = await request(fullUrl, {
+      method: 'POST',
       headers: {
         ...options?.headers,
         ...formData.getHeaders(),
       },
+      body: formData,
+      dispatcher: agent,
     });
 
-    return response.data;
+    const text = await response.body.text();
+    return text ? JSON.parse(text) : {};
   }
 
   /**
@@ -291,9 +342,15 @@ export class HttpClientService {
   /**
    * 获取原始响应（包含 headers 等）
    */
-  async getRaw(serviceName: string, url: string, options?: RequestOptions): Promise<AxiosResponse> {
-    const client = this.getClient(serviceName, { baseURL: options?.baseURL });
-    return await client.get(url, options);
+  async getRaw(serviceName: string, url: string, options?: RequestOptions): Promise<Dispatcher.ResponseData> {
+    const fullUrl = this.buildUrl(options?.baseURL, url, options?.params);
+    const agent = this.getAgent(serviceName);
+
+    return await request(fullUrl, {
+      method: 'GET',
+      headers: options?.headers,
+      dispatcher: agent,
+    });
   }
 
   /**
@@ -312,16 +369,30 @@ export class HttpClientService {
   }
 
   /**
-   * 清除客户端缓存
+   * 清除 Agent
    */
-  clearClient(serviceName: string): void {
-    this.clients.delete(serviceName);
+  async clearAgent(serviceName: string): Promise<void> {
+    const agent = this.agents.get(serviceName);
+    if (agent) {
+      await agent.close();
+      this.agents.delete(serviceName);
+    }
   }
 
   /**
-   * 清除所有客户端缓存
+   * 清除所有 Agent
    */
-  clearAllClients(): void {
-    this.clients.clear();
+  async clearAllAgents(): Promise<void> {
+    for (const agent of this.agents.values()) {
+      await agent.close();
+    }
+    this.agents.clear();
+  }
+
+  /**
+   * 销毁时清理资源
+   */
+  async onModuleDestroy() {
+    await this.clearAllAgents();
   }
 }
