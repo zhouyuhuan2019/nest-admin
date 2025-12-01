@@ -6,6 +6,8 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { UserConverter } from './converters/user.converter';
 import { UserVo } from './vo/user.vo';
 import { UserListVo } from './vo/user-list.vo';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 @Controller('users')
 export class UserController {
@@ -22,13 +24,15 @@ export class UserController {
   }
 
   @Get()
-  async list(@Query() pagination: PaginationDto): Promise<UserListVo> {
+  async list(@Query() pagination: PaginationDto, @CurrentUser() user: any): Promise<UserListVo> {
+    // 可以使用 user 信息进行权限控制
     const result = await this.userService.findAll(pagination);
     return this.userConverter.toListVo(result.data, result.meta);
   }
 
   @Get(':id')
-  async get(@Param('id') id: number): Promise<UserVo> {
+  async get(@Param('id') id: number, @CurrentUser('id') userId: number): Promise<UserVo> {
+    // 可以获取当前用户的特定字段
     const po = await this.userService.findOne(id);
     return this.userConverter.toVo(po);
   }
