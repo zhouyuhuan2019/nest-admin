@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
@@ -8,7 +9,10 @@ import { BusinessException } from '../common/exceptions/business.exception';
 
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async create(data: CreateUserDto): Promise<UserPo> {
     // 示例：业务逻辑校验
@@ -49,12 +53,19 @@ export class UserService {
   }
 
   async findOne(id: number): Promise<UserPo> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) {
-      // 使用业务异常
-      throw BusinessException.notFound(`用户 ID ${id} 不存在`);
-    }
-    return user as UserPo;
+    // 使用 getOrSet 自动处理缓存逻辑
+    return await this.redis.getOrSet(
+      'user',
+      `detail:${id}`,
+      async () => {
+        const user = await this.prisma.user.findUnique({ where: { id } });
+        if (!user) {
+          throw BusinessException.notFound(`用户 ID ${id} 不存在`);
+        }
+        return user as UserPo;
+      },
+      3600, // 1小时
+    );
   }
 
   async update(id: number, data: UpdateUserDto): Promise<UserPo> {
@@ -65,10 +76,15 @@ export class UserService {
       throw BusinessException.forbidden('不允许修改为管理员邮箱');
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data,
     });
+
+    // 更新后删除缓存
+    await this.redis.delCache('user', `detail:${id}`);
+
+    return updated;
   }
 
   async remove(id: number): Promise<UserPo> {
@@ -79,7 +95,12 @@ export class UserService {
       throw BusinessException.forbidden('管理员账号不允许删除');
     }
 
-    return this.prisma.user.delete({ where: { id } });
+    const deleted = await this.prisma.user.delete({ where: { id } });
+
+    // 删除后清除缓存
+    await this.redis.delCache('user', `detail:${id}`);
+
+    return deleted;
   }
 }
 
