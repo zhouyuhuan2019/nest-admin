@@ -6,6 +6,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { LoggerService } from './common/logger/logger.service';
 
 // Fix BigInt serialization
 (BigInt.prototype as any).toJSON = function () {
@@ -14,6 +15,10 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Get services
+  const logger = app.get(LoggerService);
+  const config = app.get(ConfigService);
 
   // Global pipes
   app.useGlobalPipes(
@@ -35,19 +40,19 @@ async function bootstrap() {
   );
 
   // Global interceptors
-  app.useGlobalInterceptors(new TransformInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor(logger));
 
   // CORS
   app.enableCors();
 
-  // Get config
-  const config = app.get(ConfigService);
+  // Start server
   const port = config.get<number>('port') || 3000;
   const env = config.get<string>('nodeEnv');
 
   await app.listen(port);
-  console.log(`🚀 Server running on http://localhost:${port}`);
-  console.log(`📦 Environment: ${env}`);
+  
+  logger.log(`🚀 Server running on http://localhost:${port}`, 'Bootstrap');
+  logger.log(`📦 Environment: ${env}`, 'Bootstrap');
 }
 
 bootstrap();

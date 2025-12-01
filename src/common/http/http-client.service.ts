@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { Readable } from 'stream';
+import { LoggerService } from '../logger/logger.service';
 
 export interface HttpClientConfig {
   baseURL?: string;
@@ -23,8 +24,13 @@ export interface StreamOptions {
 
 @Injectable()
 export class HttpClientService {
-  private readonly logger = new Logger(HttpClientService.name);
+  private readonly logger: LoggerService;
   private clients: Map<string, AxiosInstance> = new Map();
+
+  constructor(logger: LoggerService) {
+    this.logger = logger;
+    this.logger.setContext('HttpClientService');
+  }
 
   /**
    * 创建或获取 HTTP 客户端实例
@@ -134,6 +140,8 @@ export class HttpClientService {
   async getStream(serviceName: string, url: string, options?: RequestOptions & StreamOptions): Promise<Readable> {
     const client = this.getClient(serviceName, { baseURL: options?.baseURL });
 
+    this.logger.debug(`[${serviceName}] 开始流式 GET 请求: ${url}`);
+
     const response = await client.get(url, {
       ...options,
       responseType: 'stream',
@@ -141,17 +149,27 @@ export class HttpClientService {
 
     const stream = response.data as Readable;
 
-    if (options?.onData) {
-      stream.on('data', options.onData);
-    }
+    // 添加数据监听日志
+    stream.on('data', (chunk) => {
+      this.logger.debug(`[${serviceName}] 流式数据块: ${chunk.toString().substring(0, 200)}...`);
+      if (options?.onData) {
+        options.onData(chunk);
+      }
+    });
 
-    if (options?.onEnd) {
-      stream.on('end', options.onEnd);
-    }
+    stream.on('end', () => {
+      this.logger.debug(`[${serviceName}] 流式响应结束`);
+      if (options?.onEnd) {
+        options.onEnd();
+      }
+    });
 
-    if (options?.onError) {
-      stream.on('error', options.onError);
-    }
+    stream.on('error', (error) => {
+      this.logger.error(`[${serviceName}] 流式响应错误: ${error.message}`);
+      if (options?.onError) {
+        options.onError(error);
+      }
+    });
 
     return stream;
   }
@@ -167,6 +185,8 @@ export class HttpClientService {
   ): Promise<Readable> {
     const client = this.getClient(serviceName, { baseURL: options?.baseURL });
 
+    this.logger.debug(`[${serviceName}] 开始流式 POST 请求: ${url}`);
+
     const response = await client.post(url, data, {
       ...options,
       responseType: 'stream',
@@ -174,17 +194,27 @@ export class HttpClientService {
 
     const stream = response.data as Readable;
 
-    if (options?.onData) {
-      stream.on('data', options.onData);
-    }
+    // 添加数据监听日志
+    stream.on('data', (chunk) => {
+      this.logger.debug(`[${serviceName}] 流式数据块: ${chunk.toString().substring(0, 200)}...`);
+      if (options?.onData) {
+        options.onData(chunk);
+      }
+    });
 
-    if (options?.onEnd) {
-      stream.on('end', options.onEnd);
-    }
+    stream.on('end', () => {
+      this.logger.debug(`[${serviceName}] 流式响应结束`);
+      if (options?.onEnd) {
+        options.onEnd();
+      }
+    });
 
-    if (options?.onError) {
-      stream.on('error', options.onError);
-    }
+    stream.on('error', (error) => {
+      this.logger.error(`[${serviceName}] 流式响应错误: ${error.message}`);
+      if (options?.onError) {
+        options.onError(error);
+      }
+    });
 
     return stream;
   }

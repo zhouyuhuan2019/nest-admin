@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { HttpClientFactory } from '../../common/http/http-client.factory';
+import { LoggerService } from '../../common/logger/logger.service';
 import { ExampleApiClient } from '../clients/example-api.client';
 
 /**
@@ -8,10 +9,15 @@ import { ExampleApiClient } from '../clients/example-api.client';
  */
 @Injectable()
 export class UserExternalService {
-  private readonly logger = new Logger(UserExternalService.name);
+  private readonly logger: LoggerService;
   private exampleApiClient: ExampleApiClient;
 
-  constructor(private readonly httpClientFactory: HttpClientFactory) {
+  constructor(
+    private readonly httpClientFactory: HttpClientFactory,
+    private readonly loggerService: LoggerService,
+  ) {
+    this.logger = loggerService;
+    this.logger.setContext('UserExternalService');
     // 创建 API 客户端实例
     this.exampleApiClient = this.httpClientFactory.create(ExampleApiClient);
   }

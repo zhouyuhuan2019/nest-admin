@@ -1,13 +1,19 @@
-import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import Redis, { RedisOptions } from 'ioredis';
+import { LoggerService } from '../common/logger/logger.service';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(RedisService.name);
+  private readonly logger: LoggerService;
   private client: Redis | null = null;
   private isEnabled: boolean = false;
 
-  constructor(options?: RedisOptions) {
+  constructor(
+    private readonly loggerService: LoggerService,
+    options?: RedisOptions,
+  ) {
+    this.logger = loggerService;
+    this.logger.setContext('RedisService');
     if (!options || !options.host) {
       this.logger.warn('Redis 未配置，将跳过 Redis 功能');
       return;
@@ -316,19 +322,19 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (this.isAvailable()) {
       const cached = await this.get<T>(cacheKey);
       if (cached !== null) {
-        this.logger.debug(`缓存命中: ${cacheKey}`);
+        this.logger.cache('HIT', cacheKey);
         return cached;
       }
     }
 
     // 缓存未命中，执行数据获取
-    this.logger.debug(`缓存未命中: ${cacheKey}`);
+    this.logger.cache('MISS', cacheKey);
     const data = await fetcher();
 
     // 写入缓存
     if (this.isAvailable() && data !== null && data !== undefined) {
       await this.set(cacheKey, data, ttl);
-      this.logger.debug(`缓存写入: ${cacheKey}, TTL: ${ttl}s`);
+      this.logger.cache('SET', cacheKey);
     }
 
     return data;
