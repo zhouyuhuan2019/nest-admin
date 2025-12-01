@@ -1,14 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateUserDto } from '../common/dto/create-user.dto';
-import { UpdateUserDto } from '../common/dto/update-user.dto';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import { UserPo } from './po/user.po';
 
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(data: CreateUserDto) {
+  async create(data: CreateUserDto): Promise<UserPo> {
     return this.prisma.user.create({ data });
   }
 
@@ -26,7 +27,7 @@ export class UserService {
     ]);
 
     return {
-      data: users,
+      data: users as UserPo[],
       meta: {
         total,
         page,
@@ -36,15 +37,15 @@ export class UserService {
     };
   }
 
-  async findOne(id: number) {
+  async findOne(id: number): Promise<UserPo> {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    return user;
+    return user as UserPo;
   }
 
-  async update(id: number, data: UpdateUserDto) {
+  async update(id: number, data: UpdateUserDto): Promise<UserPo> {
     await this.findOne(id);
     return this.prisma.user.update({
       where: { id },
@@ -52,7 +53,7 @@ export class UserService {
     });
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<UserPo> {
     await this.findOne(id);
     return this.prisma.user.delete({ where: { id } });
   }
