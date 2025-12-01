@@ -1,0 +1,76 @@
+### API 测试文件
+### 可以使用 VS Code 的 REST Client 插件运行这些请求
+
+@baseUrl = http://localhost:3000
+
+### 1. 健康检查
+GET {{baseUrl}}/health
+
+### 2. 获取应用信息
+GET {{baseUrl}}/
+
+### 3. 创建用户
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "name": "Test User"
+}
+
+### 4. 创建另一个用户
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "name": "John Doe"
+}
+
+### 5. 获取用户列表（无分页）
+GET {{baseUrl}}/users
+
+### 6. 获取用户列表（带分页）
+GET {{baseUrl}}/users?page=1&limit=10
+
+### 7. 获取单个用户（需要替换 {userId} 为实际的用户 ID）
+@userId = clxxxxxxxxxxxxxx
+GET {{baseUrl}}/users/{{userId}}
+
+### 8. 更新用户
+PUT {{baseUrl}}/users/{{userId}}
+Content-Type: application/json
+
+{
+  "name": "Updated Name"
+}
+
+### 9. 删除用户
+DELETE {{baseUrl}}/users/{{userId}}
+
+### 10. 测试验证 - 无效邮箱
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "email": "invalid-email",
+  "name": "Test"
+}
+
+### 11. 测试验证 - 缺少必填字段
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "name": "Test"
+}
+
+### 12. 测试验证 - 额外字段（应该被过滤）
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "email": "test2@example.com",
+  "name": "Test User 2",
+  "extraField": "should be filtered"
+}
