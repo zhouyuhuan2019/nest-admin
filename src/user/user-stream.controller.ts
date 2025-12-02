@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Sse, StreamableFile, Header } from '@nestjs/common';
 import { Observable, interval, map } from 'rxjs';
+import { Public } from '../common/decorators/public.decorator';
 import { SkipTransform } from '../common/decorators/skip-transform.decorator';
 import { createReadStream } from 'fs';
 import { join } from 'path';
@@ -33,6 +34,7 @@ export class UserStreamController {
    * 示例 2: 使用 @SkipTransform 装饰器跳过响应包装
    * 返回原始数据
    */
+  @Public()
   @Get('raw/:id')
   @SkipTransform()
   getRawData(@Param('id') id: string) {
